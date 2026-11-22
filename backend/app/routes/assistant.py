@@ -1,7 +1,8 @@
 from fastapi import APIRouter, HTTPException
 from app.models import ChatMessage
 from app.database import get_supabase
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 import os
 import uuid
 from dotenv import load_dotenv
@@ -41,22 +42,22 @@ def build_schemes_context(schemes: list) -> str:
     if not schemes:
         return "No schemes available in database."
 
-    context = "GOVERNMENT SCHEMES DATABASE:\n\n"
+    context = "GOVERNMENT SCHEMES DATABASE:\\n\\n"
     for scheme in schemes:
-        context += f"**{scheme['name']}** (Category: {scheme['category']})\n"
-        context += f"Description: {scheme['description']}\n"
-        context += f"Benefits: {scheme['benefits']}\n"
+        context += f"**{scheme['name']}** (Category: {scheme['category']})\\n"
+        context += f"Description: {scheme['description']}\\n"
+        context += f"Benefits: {scheme['benefits']}\\n"
         context += f"Eligibility: Age {scheme['min_age']}-{scheme['max_age']}, "
         if scheme['max_annual_income'] < 9999999999:
             context += f"Income up to ₹{scheme['max_annual_income']:,}, "
         occupations = scheme.get('eligible_occupations', ['all'])
         if 'all' not in [o.lower() for o in occupations]:
             context += f"Occupations: {', '.join(occupations)}, "
-        context += "\n"
-        context += f"Documents: {', '.join(scheme.get('documents_required', []))}\n"
-        context += f"Application: {scheme['application_procedure']}\n"
-        context += f"Official Website: {scheme['official_url']}\n\n"
-        context += "---\n"
+        context += "\\n"
+        context += f"Documents: {', '.join(scheme.get('documents_required', []))}\\n"
+        context += f"Application: {scheme['application_procedure']}\\n"
+        context += f"Official Website: {scheme['official_url']}\\n\\n"
+        context += "---\\n"
 
     return context
 
@@ -65,30 +66,28 @@ def build_schemes_context(schemes: list) -> str:
 def chat_with_assistant(message: ChatMessage):
     """Chat with the AI assistant about government schemes."""
 
-    # Check if Gemini API key is configured
     if not GEMINI_API_KEY:
         raise HTTPException(
             status_code=503,
             detail=(
                 "Gemini API key is not configured. "
-                "Add GEMINI_API_KEY to your backend/.env file. "
-                "Get a free key at https://aistudio.google.com/"
+                "Add GEMINI_API_KEY to your backend environment variables. "
+                "Get a key at https://aistudio.google.com/"
             )
         )
 
     try:
-        # Fetch all schemes for context
+        # Fetch schemes for context. The assistant can still answer general
+        # navigation questions if the database is temporarily unavailable.
         try:
             db = get_supabase()
             result = db.table("schemes").select("*").eq("is_active", True).execute()
             schemes = result.data
-        except RuntimeError:
+        except Exception:
             schemes = []
 
-        # Build context
         schemes_context = build_schemes_context(schemes)
 
-        # Build user context if profile provided
         profile_context = ""
         if message.user_profile:
             p = message.user_profile
@@ -101,14 +100,6 @@ USER PROFILE:
 - Education: {p.education}
 """
 
-        # Configure Gemini
-        genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel(
-            model_name="gemini-1.5-flash",
-            system_instruction=SYSTEM_PROMPT
-        )
-
-        # Build full prompt
         full_prompt = f"""
 {schemes_context}
 
@@ -119,11 +110,14 @@ USER QUESTION: {message.message}
 Please answer based on the scheme data above. Include official links where relevant.
 """
 
-        # Generate response
-        response = model.generate_content(full_prompt)
-        ai_response = response.text
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        response = client.models.generate_content(
+            model="gemini-3.8-flash",
+            contents=full_prompt,
+            config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT),
+        )
+        ai_response = response.text or "Sorry, I couldn't generate a response. Please try again."
 
-        # Extract source links
         sources = list(set(
             scheme["official_url"] for scheme in schemes
             if scheme["name"].lower() in ai_response.lower()
@@ -131,7 +125,7 @@ Please answer based on the scheme data above. Include official links where relev
 
         session_id = message.session_id or str(uuid.uuid4())
 
-        # Log conversation (best effort - ignore failures)
+        # Conversation logging is optional; failures must not break chat.
         try:
             db = get_supabase()
             db.table("chat_sessions").insert({
@@ -140,7 +134,7 @@ Please answer based on the scheme data above. Include official links where relev
                 "assistant_response": ai_response
             }).execute()
         except Exception:
-            pass  # Logging is non-critical
+            pass
 
         return {
             "response": ai_response,
@@ -148,13 +142,12 @@ Please answer based on the scheme data above. Include official links where relev
             "session_id": session_id
         }
 
-    except HTTPException:
-        raise
     except Exception as e:
         error_msg = str(e)
         if "API_KEY" in error_msg.upper() or "api key" in error_msg.lower():
             raise HTTPException(
                 status_code=503,
-                detail="Invalid Gemini API key. Please check your GEMINI_API_KEY in backend/.env"
+                detail="Gemini API key is invalid or unavailable. Check GEMINI_API_KEY in Vercel."
             )
         raise HTTPException(status_code=500, detail=f"AI assistant error: {error_msg}")
+}
