@@ -76,7 +76,7 @@ schemefinder-ai/
 4. Run `database/seed.sql` to insert 12 government schemes
 5. Go to **Settings → API** and copy:
    - **Project URL** (e.g., `https://abc.supabase.co`)
-   - **anon public key**
+   - **Secret key** for server-side backend use (never expose it in frontend code or a `VITE_` variable)
 
 ---
 
