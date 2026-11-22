@@ -3,7 +3,8 @@
   "services": {
     "schemefinder-ai-backend": {
       "root": "backend/",
-      "entrypoint": "app.main:app"
+      "entrypoint": "app.main:app",
+      "framework": "fastapi"
     },
     "frontend": {
       "root": "frontend/",
