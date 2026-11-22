@@ -10,122 +10,105 @@ from dotenv import load_dotenv
 load_dotenv()
 
 router = APIRouter(prefix="/assistant", tags=["AI Assistant"])
-
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
 SYSTEM_PROMPT = """You are a helpful AI assistant for SchemeFinder AI, a platform that helps Indian citizens discover government schemes they may be eligible for.
 
 Your role:
-- Answer questions about Indian government schemes clearly and accurately
-- Use ONLY the scheme data provided to you as context
-- Provide practical guidance on eligibility, documents, and application procedures
-- Always include official website links where relevant
-- Use simple English that is easy for all citizens to understand
-- If a question is about a scheme not in the database, say so clearly
+- Answer questions about Indian government schemes clearly and accurately.
+- Use the supplied scheme database as the source for scheme-specific details.
+- Explain eligibility, benefits, documents, and application steps in simple English.
+- Include official website links from the supplied data when relevant.
+- If a scheme is not in the supplied data, say so rather than guessing.
 
 Important rules:
-- Do NOT invent schemes, benefits, or eligibility criteria not in the provided data
-- Do NOT provide incorrect official links
-- If you are unsure about something, say "I'm not sure about this. Please verify at the official scheme website."
-- Always end with a reminder that final eligibility is determined by the relevant government department
+- Never invent schemes, benefits, eligibility criteria, or official links.
+- If information is missing or uncertain, ask the user to verify it on the relevant official government website.
+- Always explain that the relevant government department makes the final eligibility decision.
 
-Format your responses with:
-- Clear headings for different schemes
-- Bullet points for eligibility criteria and documents
-- Bold text for important information
-- Official links clearly marked
+Use clear headings, short paragraphs, and bullet points where useful.
 """
 
 
 def build_schemes_context(schemes: list) -> str:
-    """Build a context string from all schemes for the AI."""
+    """Build a readable context string from the scheme database."""
     if not schemes:
-        return "No schemes available in database."
+        return "No schemes are currently available in the database."
 
-    context = "GOVERNMENT SCHEMES DATABASE:\\n\\n"
+    context = "GOVERNMENT SCHEMES DATABASE:\n\n"
     for scheme in schemes:
-        context += f"**{scheme['name']}** (Category: {scheme['category']})\\n"
-        context += f"Description: {scheme['description']}\\n"
-        context += f"Benefits: {scheme['benefits']}\\n"
+        context += f"**{scheme['name']}** (Category: {scheme['category']})\n"
+        context += f"Description: {scheme['description']}\n"
+        context += f"Benefits: {scheme['benefits']}\n"
         context += f"Eligibility: Age {scheme['min_age']}-{scheme['max_age']}, "
         if scheme['max_annual_income'] < 9999999999:
-            context += f"Income up to ₹{scheme['max_annual_income']:,}, "
-        occupations = scheme.get('eligible_occupations', ['all'])
+            context += f"annual income up to ₹{scheme['max_annual_income']:,}, "
+        occupations = scheme.get('eligible_occupations') or ['all']
         if 'all' not in [o.lower() for o in occupations]:
             context += f"Occupations: {', '.join(occupations)}, "
-        context += "\\n"
-        context += f"Documents: {', '.join(scheme.get('documents_required', []))}\\n"
-        context += f"Application: {scheme['application_procedure']}\\n"
-        context += f"Official Website: {scheme['official_url']}\\n\\n"
-        context += "---\\n"
+        context += "\n"
+        context += f"Documents: {', '.join(scheme.get('documents_required') or [])}\n"
+        context += f"Application: {scheme['application_procedure']}\n"
+        context += f"Official Website: {scheme['official_url']}\n\n"
+        context += "---\n"
 
     return context
 
 
 @router.post("/chat")
 def chat_with_assistant(message: ChatMessage):
-    """Chat with the AI assistant about government schemes."""
-
+    """Answer questions about Indian government schemes using Gemini."""
     if not GEMINI_API_KEY:
         raise HTTPException(
             status_code=503,
-            detail=(
-                "Gemini API key is not configured. "
-                "Add GEMINI_API_KEY to your backend environment variables. "
-                "Get a key at https://aistudio.google.com/"
-            )
+            detail="Gemini API key is not configured. Add GEMINI_API_KEY to the backend environment variables."
         )
 
     try:
-        # Fetch schemes for context. The assistant can still answer general
-        # navigation questions if the database is temporarily unavailable.
+        schemes = []
         try:
             db = get_supabase()
             result = db.table("schemes").select("*").eq("is_active", True).execute()
-            schemes = result.data
+            schemes = result.data or []
         except Exception:
+            # Keep general assistant questions available if Supabase is temporarily unavailable.
             schemes = []
-
-        schemes_context = build_schemes_context(schemes)
 
         profile_context = ""
         if message.user_profile:
             p = message.user_profile
-            profile_context = f"""
-USER PROFILE:
-- Age: {p.age} years
-- State: {p.state}
-- Occupation: {p.occupation}
-- Annual Income: ₹{p.annual_income:,}
-- Education: {p.education}
-"""
+            profile_context = (
+                f"\nUSER PROFILE:\n"
+                f"- Age: {p.age} years\n"
+                f"- State: {p.state}\n"
+                f"- Occupation: {p.occupation}\n"
+                f"- Annual income: ₹{p.annual_income:,}\n"
+                f"- Education: {p.education}\n"
+            )
 
-        full_prompt = f"""
-{schemes_context}
-
-{profile_context}
-
-USER QUESTION: {message.message}
-
-Please answer based on the scheme data above. Include official links where relevant.
-"""
+        prompt = (
+            f"{build_schemes_context(schemes)}\n"
+            f"{profile_context}\n"
+            f"USER QUESTION: {message.message}\n\n"
+            "Answer using the supplied scheme information. Do not guess missing details."
+        )
 
         client = genai.Client(api_key=GEMINI_API_KEY)
         response = client.models.generate_content(
             model="gemini-3.8-flash",
-            contents=full_prompt,
+            contents=prompt,
             config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT),
         )
         ai_response = response.text or "Sorry, I couldn't generate a response. Please try again."
 
-        sources = list(set(
+        sources = list(dict.fromkeys(
             scheme["official_url"] for scheme in schemes
             if scheme["name"].lower() in ai_response.lower()
         ))[:5]
 
         session_id = message.session_id or str(uuid.uuid4())
 
-        # Conversation logging is optional; failures must not break chat.
+        # Chat history is optional; a logging failure should not break the response.
         try:
             db = get_supabase()
             db.table("chat_sessions").insert({
@@ -143,11 +126,10 @@ Please answer based on the scheme data above. Include official links where relev
         }
 
     except Exception as e:
-        error_msg = str(e)
-        if "API_KEY" in error_msg.upper() or "api key" in error_msg.lower():
+        error_msg = str(e).lower()
+        if "api key" in error_msg or "api_key" in error_msg or "permission" in error_msg:
             raise HTTPException(
                 status_code=503,
-                detail="Gemini API key is invalid or unavailable. Check GEMINI_API_KEY in Vercel."
+                detail="Gemini API key is invalid or does not have access. Check GEMINI_API_KEY in Vercel."
             )
-        raise HTTPException(status_code=500, detail=f"AI assistant error: {error_msg}")
-}
+        raise HTTPException(status_code=500, detail="AI assistant is temporarily unavailable. Please try again.")
