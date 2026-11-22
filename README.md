@@ -26,7 +26,7 @@ SchemeFinder AI helps Indian citizens discover government schemes they may be el
 - **Backend**: Python FastAPI
 - **Database**: Supabase (PostgreSQL)
 - **AI**: Google Gemini API (Gemini 3.8 Flash)
-- **Deployment**: Vercel (frontend) + Render (backend)
+- **Deployment**: Vercel Services (frontend + backend in one project)
 
 ---
 
@@ -90,7 +90,7 @@ copy .env.example .env
 Edit `backend/.env`:
 ```
 SUPABASE_URL=https://your-project-id.supabase.co
-SUPABASE_KEY=your-anon-public-key
+SUPABASE_KEY=your-supabase-secret-key
 GEMINI_API_KEY=your-gemini-api-key
 CORS_ORIGINS=http://localhost:5173
 ```
