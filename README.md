@@ -16,7 +16,7 @@ SchemeFinder AI helps Indian citizens discover government schemes they may be el
 | AI Assistant (Gemini) | ✅ |
 | Scheme Details page | ✅ |
 | Supabase PostgreSQL database | ✅ |
-| 12 verified government schemes | ✅ |
+| 12 sample scheme records included in seed data | ✅ |
 
 ---
 
@@ -25,7 +25,7 @@ SchemeFinder AI helps Indian citizens discover government schemes they may be el
 - **Frontend**: React + Vite + TypeScript + Tailwind CSS
 - **Backend**: Python FastAPI
 - **Database**: Supabase (PostgreSQL)
-- **AI**: Google Gemini 1.5 Flash
+- **AI**: Google Gemini API (Gemini 3.8 Flash)
 - **Deployment**: Vercel (frontend) + Render (backend)
 
 ---
@@ -180,22 +180,38 @@ Frontend will be at: http://localhost:5173
 
 ---
 
-## Deployment
+## Deployment on Vercel
 
-### Frontend (Vercel)
-1. Push code to GitHub
-2. Import repo in Vercel
-3. Set `VITE_API_BASE_URL=https://your-render-backend.onrender.com` in Vercel env vars
-4. Deploy
+This repository is configured as a Vercel multi-service project:
 
-### Backend (Render)
-1. Create new **Web Service** on Render
-2. Connect GitHub repo, set root directory to `backend/`
-3. Build command: `pip install -r requirements.txt`
-4. Start command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
-5. Add all env vars from `.env.example`
+- **Frontend service**: `frontend/` (Vite)
+- **Backend service**: `backend/` (FastAPI)
+- **API routing**: requests under `/api/*` are routed to the backend; other paths go to the frontend.
 
----
+### Vercel setup
+
+1. Import this GitHub repository into Vercel.
+2. In **Settings → Build and Deployment**, set the project framework to **Services**.
+3. Confirm the root `vercel.json` file is included in the deployment.
+4. Add these environment variables to the backend service (or the project environment if Vercel applies them to all services):
+   - `SUPABASE_URL`: Supabase Project URL, without `/rest/v1/`.
+   - `SUPABASE_KEY`: Supabase server-side key. Keep it private; never use it in a `VITE_*` variable.
+   - `GEMINI_API_KEY`: Google AI Studio API key. Keep it private.
+5. Enable the Production environment (and Preview if you want preview deployments).
+6. Redeploy after changing environment variables or code.
+
+The frontend uses same-origin `/api` requests in production, so a separate `VITE_API_BASE_URL` is not required for this Vercel setup.
+
+### Supabase database setup
+
+Before testing scheme browsing or eligibility:
+
+1. Open the Supabase project **SQL Editor**.
+2. Run `database/schema.sql` once to create the tables.
+3. Run `database/seed.sql` to insert the sample scheme records.
+4. Open the deployed website and test the scheme list, search, eligibility checker, and AI assistant.
+
+Do not run the seed script repeatedly unless you intend to add duplicate sample rows.
 
 ## Government Schemes in Database
 
@@ -216,7 +232,7 @@ Frontend will be at: http://localhost:5173
 
 ## Data Sources
 
-All scheme data sourced from official government portals:
+The seed data contains example scheme information with source links. Scheme rules, benefits, amounts, deadlines, and application processes can change. Verify each detail on the relevant official government portal before relying on it:
 - https://www.myscheme.gov.in
 - https://www.india.gov.in
 - https://scholarships.gov.in
@@ -231,4 +247,4 @@ All scheme data sourced from official government portals:
 
 ## Disclaimer
 
-SchemeFinder AI provides indicative information only. Final eligibility is determined by the relevant government department. Always verify details at official government websites before applying.
+SchemeFinder AI provides indicative information for discovery and education only. The sample scheme records may not reflect the latest rules or benefit amounts. Final eligibility is determined only by the relevant government department. Always verify current criteria, benefits, deadlines, and application instructions on official government websites before applying.
